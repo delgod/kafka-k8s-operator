@@ -1,0 +1,37 @@
+# Copyright 2022 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+name: kafka-k8s
+display-name: |
+    Charmed Kafka
+description: |
+    Apache Kafka is an open-source distributed event streaming platform
+    used by thousands of companies for high-performance data pipelines,
+    streaming analytics, data integration, and mission-critical applications.
+summary: A Kafka operator charm for Kubernetes
+peers:
+  kafka-peers:
+    interface: kafka-peers
+requires:
+  zookeeper:
+    interface: zookeeper-client
+    limit: 1
+provides:
+  kafka:
+    interface: kafka-client
+    optional: true
+containers:
+  kafka:
+    resource: kafka-image
+    mounts:
+      - storage: db
+        location: /data/db
+resources:
+  kafka-image:
+    type: oci-image
+    description: OCI image for kafka
+    upstream-source: 'ubuntu/kafka:latest'
+storage:
+  db:
+    type: filesystem
+    location: /data/db
