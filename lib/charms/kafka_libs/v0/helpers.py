@@ -37,7 +37,7 @@ def get_kafka_cmd() -> str:
     """
 
     cmd = [
-        "/usr/bin/java",
+        "java",
         "-server -Djava.awt.headless=true",
 
         "-Xmx1G -Xms1G",
@@ -78,23 +78,21 @@ def generate_password() -> str:
     return "".join([secrets.choice(choices) for _ in range(32)])
 
 
-def get_main_config(myid, planned_units: int, config: ZooKeeperConfiguration) -> str:
+def get_main_config(myid, planned_units: int, fqdn, zookeeper_uri: str) -> str:
     """Generate content of the main Kafka config file"""
-    connect_str = ""
-    if len(config.hosts) > 0:
-        connect_str = config.uri
     replication_factor = int(planned_units / 2) + 1
     return f"""
         broker.id={myid}
-        listeners=PLAINTEXT://:9092
+        listeners=SASL_PLAINTEXT://:9093
+        advertised.listeners=SASL_PLAINTEXT://{fqdn}:9093
         log.dirs={LOGS_DIR}
-        
+
         default.replication.factor={replication_factor}
         offsets.topic.replication.factor={replication_factor}
         transaction.state.log.replication.factor={replication_factor}
         transaction.state.log.min.isr={replication_factor}
-        
-        zookeeper.connect={connect_str}
+
+        zookeeper.connect={zookeeper_uri}
     """
 
 

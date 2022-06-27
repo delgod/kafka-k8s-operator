@@ -64,8 +64,7 @@ class KafkaCharm(CharmBase):
 
         # Prepare configs
         if self.zookeeper_config is not None and type(event) is not RelationDepartedEvent:
-            self._put_general_config(event)
-            self._put_auth_config(event)
+            self._put_configs(event)
             container.add_layer("kafka", self._kafka_layer(True), combine=True)
         else:
             if container.get_services("kafka"):
@@ -78,20 +77,11 @@ class KafkaCharm(CharmBase):
         # TODO: rework status
         self.unit.status = ActiveStatus()
 
-    def _generate_passwords(self) -> None:
-        """Generate passwords and put them into peer relation.
-
-        The same sync password on all members needed.
-        It means, it is needed to generate them once and share between members.
-        NB: only leader should execute this function.
-        """
-        if "sync_password" not in self.app_data:
-            self.app_data["sync_password"] = generate_password()
-
     def _on_leader_elected(self, _):
         # Admin password should be created before running Kafka.
         # This code runs on leader_elected event before pebble_ready
-        self._generate_passwords()
+        if "sync_password" not in self.app_data:
+            self.app_data["sync_password"] = generate_password()
 
     @staticmethod
     def _kafka_layer(startup: bool) -> Layer:
@@ -143,45 +133,7 @@ class KafkaCharm(CharmBase):
 
         return None
 
-    def _put_auth_config(self, event: HookEvent) -> None:
-        """Upload the Auth config to a workload container."""
-        container = self.unit.get_container("kafka")
-        if not container.can_connect():
-            logger.debug("kafka container is not ready yet.")
-            event.defer()
-            return
-
-        new_content = get_auth_config(self.zookeeper_config)
-        old_content = None
-        try:
-            old_content = container.pull(AUTH_CONFIG_PATH).read()
-        except (PathError, ProtocolError):
-            pass
-
-        if new_content == old_content:
-            logger.debug("Restart not needed")
-            return
-
-        try:
-            container.push(
-                AUTH_CONFIG_PATH,
-                new_content,
-                make_dirs=True,
-                permissions=0o400,
-                user=UNIX_USER,
-                group=UNIX_GROUP,
-            )
-        except (PathError, ProtocolError) as e:
-            logger.error("Cannot put configs: %r", e)
-            event.defer()
-            return
-
-        if container.get_services("kafka"):
-            container.stop("kafka")
-
-        container.replan()
-
-    def _put_general_config(self, event: HookEvent) -> None:
+    def _put_configs(self, event: HookEvent) -> None:
         """Upload the configs to a workload container."""
         container = self.unit.get_container("kafka")
         if not container.can_connect():
@@ -205,10 +157,24 @@ class KafkaCharm(CharmBase):
                     user=UNIX_USER,
                     group=UNIX_GROUP,
                 )
-            myid = self._get_unit_id_by_unit(self.unit.name)
+            unit_id = self._get_unit_id_by_unit(self.unit.name)
+            unit_hostname = self._get_hostname_by_unit(self.unit.name)
             container.push(
                 MAIN_CONFIG_PATH,
-                get_main_config(myid, self.app.planned_units(), self.zookeeper_config),
+                get_main_config(
+                    unit_id,
+                    self.app.planned_units(),
+                    unit_hostname,
+                    self.zookeeper_config.uri,
+                ),
+                make_dirs=True,
+                permissions=0o400,
+                user=UNIX_USER,
+                group=UNIX_GROUP,
+            )
+            container.push(
+                AUTH_CONFIG_PATH,
+                get_auth_config(self.zookeeper_config),
                 make_dirs=True,
                 permissions=0o400,
                 user=UNIX_USER,
