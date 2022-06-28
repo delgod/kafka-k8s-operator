@@ -126,6 +126,7 @@ def get_add_user_cmd(username, password, zookeeper_uri: str) -> List[str]:
         "java",
         "-cp", f"/opt/kafka/libs/*:{CONFIG_DIR}:",
         f"-Djava.security.auth.login.config={AUTH_CONFIG_PATH}",
+        f"-Dkafka.logs.dir={LOGS_DIR}",
         "kafka.admin.ConfigCommand",
         f"--zookeeper={zookeeper_uri}",
         "--alter",
