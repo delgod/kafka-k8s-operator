@@ -20,6 +20,7 @@ from charms.kafka_libs.v0.helpers import (
     UNIX_GROUP,
     UNIX_USER,
     generate_password,
+    get_add_user_cmd,
     get_auth_config,
     get_kafka_cmd,
     get_main_config,
@@ -28,7 +29,7 @@ from charms.zookeeper_libs.v0.zookeeper import ZooKeeperConfiguration
 from ops.charm import CharmBase, HookEvent, RelationDepartedEvent, RelationJoinedEvent
 from ops.main import main
 from ops.model import ActiveStatus
-from ops.pebble import Layer, PathError, ProtocolError
+from ops.pebble import ExecError, Layer, PathError, ProtocolError
 
 logger = logging.getLogger(__name__)
 PEER = "kafka-peers"
@@ -165,6 +166,7 @@ class KafkaCharm(CharmBase):
                     unit_id,
                     self.app.planned_units(),
                     unit_hostname,
+                    self.app_data["sync_password"],
                     self.zookeeper_config.uri,
                 ),
                 make_dirs=True,
@@ -180,7 +182,23 @@ class KafkaCharm(CharmBase):
                 user=UNIX_USER,
                 group=UNIX_GROUP,
             )
-        except (PathError, ProtocolError) as e:
+            if self.unit.is_leader() and "sync_password.init" not in self.app_data:
+                cmd = get_add_user_cmd(
+                    "sync",
+                    self.app_data["sync_password"],
+                    self.zookeeper_config.uri,
+                )
+                process = container.exec(
+                    cmd,
+                    working_dir=LOGS_DIR,
+                    user=UNIX_USER,
+                    group=UNIX_GROUP,
+                    combine_stderr=True,
+                )
+                output, _ = process.wait_output()
+                logger.debug("add user output: %r", output)
+                self.app_data["sync_password.init"] = "True"
+        except (PathError, ProtocolError, ExecError) as e:
             logger.error("Cannot put configs: %r", e)
             event.defer()
             return

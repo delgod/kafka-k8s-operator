@@ -5,6 +5,7 @@
 import string
 import secrets
 import logging
+from typing import List
 from charms.zookeeper_libs.v0.zookeeper import ZooKeeperConfiguration
 
 # The unique Charmhub library identifier, never change it
@@ -78,9 +79,12 @@ def generate_password() -> str:
     return "".join([secrets.choice(choices) for _ in range(32)])
 
 
-def get_main_config(myid, planned_units: int, fqdn, zookeeper_uri: str) -> str:
+def get_main_config(myid, planned_units: int, fqdn, sync_password, zookeeper_uri: str) -> str:
     """Generate content of the main Kafka config file"""
     replication_factor = int(planned_units / 2) + 1
+    sync_str = "listener.name.sasl_plaintext.scram-sha-512.sasl.jaas.config=" \
+               "org.apache.kafka.common.security.scram.ScramLoginModule " \
+               f"required username=\"sync\" password=\"{sync_password}\";"
     return f"""
         broker.id={myid}
         listeners=SASL_PLAINTEXT://:9093
@@ -93,6 +97,15 @@ def get_main_config(myid, planned_units: int, fqdn, zookeeper_uri: str) -> str:
         transaction.state.log.min.isr={replication_factor}
 
         zookeeper.connect={zookeeper_uri}
+
+        sasl.enabled.mechanisms=SCRAM-SHA-512
+        sasl.mechanism.inter.broker.protocol=SCRAM-SHA-512
+        security.inter.broker.protocol=SASL_PLAINTEXT
+        authorizer.class.name=kafka.security.authorizer.AclAuthorizer
+        allow.everyone.if.no.acl.found=false
+        super.users=User:sync
+        listener.name.sasl_plaintext.sasl.enabled.mechanisms=SCRAM-SHA-512
+        {sync_str}
     """
 
 
@@ -105,3 +118,19 @@ def get_auth_config(config: ZooKeeperConfiguration) -> str:
             password="{config.password}";
         }};
     """
+
+
+def get_add_user_cmd(username, password, zookeeper_uri: str) -> List[str]:
+    """Return command to add user"""
+    return [
+        "java",
+        "-cp", f"/opt/kafka/libs/*:{CONFIG_DIR}:",
+        f"-Djava.security.auth.login.config={AUTH_CONFIG_PATH}",
+        f"-Dkafka.logs.dir={LOGS_DIR}",
+        "kafka.admin.ConfigCommand",
+        f"--zookeeper={zookeeper_uri}",
+        "--alter",
+        "--entity-type=users",
+        f"--entity-name={username}",
+        f"--add-config=SCRAM-SHA-512=[password={password}]",
+    ]
